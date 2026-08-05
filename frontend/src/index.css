@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  ResiliChain AI design tokens.
+  Light:  bg #F8FAFC · card #FFFFFF · primary #2563EB · text #111827
+  Dark:   bg #0F172A · card #1E293B · primary #3B82F6
+  Chart series colors are a CVD-validated categorical palette (validated
+  against #FFFFFF and #1E293B surfaces) — distinct from status colors.
+*/
+@layer base {
+  :root {
+    --background: 210 40% 98%; /* #F8FAFC */
+    --foreground: 221 39% 11%; /* #111827 */
+    --card: 0 0% 100%; /* #FFFFFF */
+    --card-foreground: 221 39% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 221 39% 11%;
+    --primary: 221 83% 53%; /* #2563EB */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%; /* #F1F5F9 */
+    --secondary-foreground: 221 39% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 220 9% 46%; /* #6B7280 */
+    --accent: 210 40% 94%;
+    --accent-foreground: 221 39% 11%;
+    --destructive: 0 72% 51%; /* #DC2626 */
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 76% 36%; /* #16A34A */
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%; /* #F59E0B */
+    --warning-foreground: 26 83% 14%;
+    --border: 220 13% 91%; /* #E5E7EB */
+    --input: 220 13% 91%;
+    --ring: 221 83% 53%;
+    --radius: 0.5rem;
+
+    /* Chart series (categorical, fixed order — never cycled) */
+    --chart-1: #2a78d6;
+    --chart-2: #eb6834;
+    --chart-3: #1baf7a;
+    --chart-4: #eda100;
+    --chart-5: #e87ba4;
+    --chart-grid: #e5e7eb;
+    --chart-axis: #9ca3af;
+  }
+
+  .dark {
+    --background: 222 47% 11%; /* #0F172A */
+    --foreground: 210 40% 96%; /* #F1F5F9 */
+    --card: 217 33% 17%; /* #1E293B */
+    --card-foreground: 210 40% 96%;
+    --popover: 217 33% 17%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 217 91% 60%; /* #3B82F6 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 22%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 33% 22%;
+    --muted-foreground: 215 20% 65%; /* #94A3B8 */
+    --accent: 217 33% 24%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 84% 60%; /* #EF4444 */
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 69% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 26 83% 14%;
+    --border: 215 25% 27%; /* #334155 */
+    --input: 215 25% 27%;
+    --ring: 217 91% 60%;
+
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-grid: #334155;
+    --chart-axis: #64748b;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04";
+  }
+
+  /* Subtle scrollbars befitting an enterprise tool */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-muted-foreground/25;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* React Flow theming overrides */
+.react-flow__attribution {
+  @apply !bg-transparent text-[10px] !text-muted-foreground;
+}
+.react-flow__controls {
+  @apply overflow-hidden rounded-md border border-border shadow-card;
+}
+.react-flow__controls-button {
+  @apply !border-border !bg-card !text-foreground;
+}
+.react-flow__controls-button:hover {
+  @apply !bg-accent;
+}
+.react-flow__minimap {
+  @apply rounded-md border border-border;
+}
