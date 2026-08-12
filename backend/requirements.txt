@@ -37,3 +37,4 @@ scikit-learn>=1.4.0
 matplotlib>=3.8.0
 joblib>=1.4.0
 PyYAML>=6.0.0
+networkx>=3.2.0

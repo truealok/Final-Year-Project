@@ -16,6 +16,10 @@ class SimulationRunRequest(BaseModel):
     probability: float = Field(default=0.5, ge=0.0, le=1.0)
     affected_node_id: uuid.UUID | None = None
     affected_node_type: NodeType | None = None
+    monte_carlo_runs: int = Field(
+        default=500, ge=10, le=5000,
+        description="Monte Carlo replications (lower = faster, noisier)",
+    )
     notes: str | None = Field(default=None, max_length=500)
 
 
@@ -46,6 +50,13 @@ class SimulationResult(BaseModel):
     risk_level: RiskLevel
     affected_nodes: list[AffectedNode]
     affected_routes: list[AffectedRoute]
+    # Monte Carlo engine extras (additive; absent on legacy records)
+    service_level: float | None = Field(
+        default=None, description="Mean disrupted service level, 0-1"
+    )
+    baseline_service_level: float | None = None
+    emissions_tons_co2: float | None = None
+    n_runs: int | None = None
     created_at: datetime
 
 

@@ -40,13 +40,34 @@ async def test_analytics_shape(client, auth_headers):
     assert "warehouse_utilization" in body
 
 
-async def test_recommendations_generate_and_update(client, auth_headers):
+async def test_recommendations_generate_and_update(
+    client, auth_headers, seeded_refs
+):
+    # Give the rule engine a real signal: an inventory position that has
+    # fallen below its reorder point.
+    created = await client.post(
+        "/api/v1/inventory",
+        json={
+            "product_id": seeded_refs["product_id"],
+            "warehouse_id": seeded_refs["warehouse_id"],
+            "quantity": 5,
+            "reorder_point": 50,
+            "safety_stock": 25,
+            "unit_cost": 25.0,
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+
     generated = await client.post(
         "/api/v1/recommendations/generate", headers=auth_headers
     )
     assert generated.status_code == 201
     recs = generated.json()
-    assert len(recs) == 3
+    # rule engine: the below-reorder rule must fire on the seeded signal
+    assert len(recs) >= 1
+    assert any("reorder" in r["title"].lower() for r in recs)
+    assert all(r["context"].get("generated_by") == "rule_engine_v1" for r in recs)
 
     rec_id = recs[0]["id"]
     updated = await client.patch(

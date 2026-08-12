@@ -1,55 +1,42 @@
-"""Disruption simulation business logic.
+"""Disruption simulation business logic — real Monte Carlo engine.
 
-PLACEHOLDER ENGINE: a real Monte Carlo simulation is intentionally NOT
-implemented. ``_compute_outcome`` derives plausible outcome metrics from the
-scenario inputs. Swap it for the real engine later - the API contract
-(routes, request and response schemas) will not change.
+``run`` builds the shared network snapshot (same graph the digital twin
+shows), hands it to :mod:`app.services.simulation_engine` and persists the
+outcome. All metrics — resilience (area under disrupted vs baseline
+service-level curves), expected cost (real average unit price), stockout
+probability, recovery time, service level, emissions — emerge from the
+simulation; none are drawn from a distribution of "plausible numbers".
+
+The engine is CPU-bound pure Python, so it runs in a worker thread.
 """
 
-import random
 import uuid
 from typing import Any
 
-from app.models.enums import NodeType, RiskLevel, SeverityLevel
+import anyio.to_thread
+
+from app.models.enums import RiskLevel
 from app.models.simulation_history import SimulationHistory
 from app.repositories.simulation_repository import SimulationRepository
-from app.repositories.supplier_repository import SupplierRepository
-from app.repositories.warehouse_repository import WarehouseRepository
 from app.schemas.simulation import (
     AffectedNode,
     AffectedRoute,
     SimulationResult,
     SimulationRunRequest,
 )
+from app.services.digital_twin_service import DigitalTwinService
+from app.services.simulation_engine import run_simulation
 from app.utils.pagination import PaginationParams
-
-_SEVERITY_WEIGHTS = {
-    SeverityLevel.LOW: 0.25,
-    SeverityLevel.MEDIUM: 0.45,
-    SeverityLevel.HIGH: 0.70,
-    SeverityLevel.CRITICAL: 0.90,
-}
-
-_FALLBACK_NODES = [
-    ("Shenzhen Components Ltd", NodeType.SUPPLIER),
-    ("Rotterdam Distribution Hub", NodeType.WAREHOUSE),
-    ("Plant Stuttgart", NodeType.FACTORY),
-    ("Chicago Regional DC", NodeType.WAREHOUSE),
-]
-
-_ROUTE_MODES = ["truck", "rail", "ship", "air"]
 
 
 class SimulationService:
     def __init__(
         self,
         simulations: SimulationRepository,
-        suppliers: SupplierRepository,
-        warehouses: WarehouseRepository,
+        twin: DigitalTwinService,
     ) -> None:
         self.simulations = simulations
-        self.suppliers = suppliers
-        self.warehouses = warehouses
+        self.twin = twin
 
     @staticmethod
     def _risk_from_resilience(score: float) -> RiskLevel:
@@ -61,109 +48,45 @@ class SimulationService:
             return RiskLevel.HIGH
         return RiskLevel.CRITICAL
 
-    def _compute_outcome(
-        self, request: SimulationRunRequest, rng: random.Random
-    ) -> dict[str, float]:
-        """Derive plausible outcome metrics from the scenario inputs."""
-        weight = _SEVERITY_WEIGHTS[request.severity]
-        prob = request.probability
-        duration = request.duration_days
-
-        resilience = 100 - weight * 100 * (0.55 + 0.45 * prob)
-        resilience -= min(duration, 60) * 0.35
-        resilience += rng.uniform(-3, 3)
-        resilience = round(max(5.0, min(98.0, resilience)), 1)
-
-        expected_cost = (
-            (25_000 + 400_000 * weight)
-            * (0.5 + prob)
-            * (1 + duration / 30)
-            * rng.uniform(0.9, 1.1)
-        )
-        recovery = duration * (0.5 + weight * 1.4) * rng.uniform(0.85, 1.15)
-        stockout = min(0.99, weight * (0.35 + 0.65 * prob) * (1 + duration / 60))
-
-        return {
-            "resilience_score": resilience,
-            "expected_cost": round(expected_cost, 2),
-            "recovery_time_days": round(recovery, 1),
-            "stockout_probability": round(stockout, 3),
-        }
-
-    async def _pick_affected_nodes(
-        self, request: SimulationRunRequest, rng: random.Random
-    ) -> list[AffectedNode]:
-        """Choose impacted nodes, preferring real records from the database."""
-        nodes: list[AffectedNode] = []
-        suppliers, _ = await self.suppliers.list(limit=10)
-        warehouses, _ = await self.warehouses.list(limit=10)
-
-        pool: list[tuple[uuid.UUID | None, str, str]] = [
-            (s.id, s.name, NodeType.SUPPLIER.value) for s in suppliers
-        ] + [(w.id, w.name, NodeType.WAREHOUSE.value) for w in warehouses]
-        if not pool:
-            pool = [(None, name, t.value) for name, t in _FALLBACK_NODES]
-
-        count = min(len(pool), rng.randint(2, 4))
-        for node_id, name, node_type in rng.sample(pool, k=count):
-            nodes.append(
-                AffectedNode(
-                    id=node_id,
-                    name=name,
-                    type=node_type,
-                    impact_pct=round(rng.uniform(15, 85), 1),
-                )
-            )
-
-        # The explicitly targeted node is always first and hit hardest.
-        if request.affected_node_id is not None:
-            nodes.insert(
-                0,
-                AffectedNode(
-                    id=request.affected_node_id,
-                    name="Targeted node",
-                    type=(
-                        request.affected_node_type.value
-                        if request.affected_node_type
-                        else "unknown"
-                    ),
-                    impact_pct=round(rng.uniform(70, 95), 1),
-                ),
-            )
-        return nodes
-
-    @staticmethod
-    def _mock_routes(rng: random.Random) -> list[AffectedRoute]:
-        routes = []
-        for i in range(rng.randint(1, 3)):
-            routes.append(
-                AffectedRoute(
-                    name=f"Route R-{rng.randint(100, 999)}",
-                    transport_mode=rng.choice(_ROUTE_MODES),
-                    delay_hours=round(rng.uniform(6, 96), 1),
-                    status=rng.choice(["delayed", "rerouted", "suspended"]),
-                )
-            )
-        return routes
-
     async def run(
         self, request: SimulationRunRequest, user_id: uuid.UUID | None
     ) -> SimulationResult:
-        """Execute a (mock) disruption simulation and persist the outcome."""
-        rng = random.Random(
-            f"{request.simulation_type.value}:{request.severity.value}:"
-            f"{request.duration_days}:{request.probability}:"
-            f"{request.affected_node_id}"
+        """Execute the Monte Carlo disruption simulation and persist it."""
+        snapshot = await self.twin.snapshot()
+
+        outcome = await anyio.to_thread.run_sync(
+            lambda: run_simulation(
+                snapshot,
+                simulation_type=request.simulation_type,
+                severity=request.severity,
+                duration_days=request.duration_days,
+                probability=request.probability,
+                target_node_id=request.affected_node_id,
+                n_runs=request.monte_carlo_runs,
+            )
         )
-        outcome = self._compute_outcome(request, rng)
-        risk_level = self._risk_from_resilience(outcome["resilience_score"])
-        affected_nodes = await self._pick_affected_nodes(request, rng)
-        affected_routes = self._mock_routes(rng)
+        risk_level = self._risk_from_resilience(outcome.resilience_score)
+
+        affected_nodes = [AffectedNode(**n) for n in outcome.affected_nodes]
+        affected_routes = [AffectedRoute(**r) for r in outcome.affected_routes]
 
         results: dict[str, Any] = {
+            "engine": "monte_carlo_v1",
+            "n_runs": outcome.n_runs,
+            "event_occurrence_rate": outcome.event_occurrence_rate,
+            "service_level": outcome.service_level,
+            "baseline_service_level": outcome.baseline_service_level,
+            "emissions_tons_co2": outcome.emissions_tons_co2,
+            "mean_service_curve": outcome.mean_service_curve,
+            "mean_baseline_curve": outcome.mean_baseline_curve,
             "affected_nodes": [n.model_dump(mode="json") for n in affected_nodes],
-            "affected_routes": [r.model_dump(mode="json") for r in affected_routes],
-            "engine": "mock_engine_v1",
+            "affected_routes": [
+                r.model_dump(mode="json") for r in affected_routes
+            ],
+            "provenance": (
+                "demand statistics from the real sales dataset; network "
+                "parameters are configured (scripts/seed_network.py)"
+            ),
         }
         record = await self.simulations.create(
             simulation_type=request.simulation_type,
@@ -177,7 +100,10 @@ class SimulationService:
                 else None
             ),
             parameters=request.model_dump(mode="json"),
-            **outcome,
+            resilience_score=outcome.resilience_score,
+            expected_cost=outcome.expected_cost,
+            recovery_time_days=outcome.recovery_time_days,
+            stockout_probability=outcome.stockout_probability,
             risk_level=risk_level,
             results=results,
             created_by=user_id,
@@ -195,6 +121,10 @@ class SimulationService:
             risk_level=record.risk_level,
             affected_nodes=affected_nodes,
             affected_routes=affected_routes,
+            service_level=outcome.service_level,
+            baseline_service_level=outcome.baseline_service_level,
+            emissions_tons_co2=outcome.emissions_tons_co2,
+            n_runs=outcome.n_runs,
             created_at=record.created_at,
         )
 

@@ -60,6 +60,7 @@ export default function SimulationPage() {
   const [severity, setSeverity] = useState<SeverityLevel>("medium");
   const [duration, setDuration] = useState(7);
   const [probability, setProbability] = useState(0.5);
+  const [monteCarloRuns, setMonteCarloRuns] = useState(500);
   const [affectedNodeId, setAffectedNodeId] = useState<string>("any");
   const [result, setResult] = useState<SimulationResult | null>(null);
 
@@ -75,6 +76,7 @@ export default function SimulationPage() {
         probability,
         affected_node_id: node ? node.id : null,
         affected_node_type: node ? node.type : null,
+        monte_carlo_runs: monteCarloRuns,
       });
       setResult(response);
       toast.success("Simulation complete.");
@@ -187,12 +189,29 @@ export default function SimulationPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="any">Network-wide (auto-select)</SelectItem>
+                  <SelectItem value="any">Highest-impact node (auto)</SelectItem>
                   {nodes.slice(0, 60).map((node) => (
                     <SelectItem key={node.id} value={node.id}>
                       {node.name} · {titleCase(node.type)}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="mc-runs">Monte Carlo runs</Label>
+              <Select
+                value={String(monteCarloRuns)}
+                onValueChange={(value) => setMonteCarloRuns(Number(value))}
+              >
+                <SelectTrigger id="mc-runs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="100">100 · fastest, noisier</SelectItem>
+                  <SelectItem value="500">500 · balanced</SelectItem>
+                  <SelectItem value="1000">1000 · most stable</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -206,8 +225,9 @@ export default function SimulationPage() {
               Run simulation
             </Button>
             <p className="text-xs text-muted-foreground">
-              Powered by the scenario engine (Monte Carlo integration planned —
-              results are simulated).
+              Monte Carlo over the digital-twin network: demand statistics
+              come from the real sales history; network parameters
+              (capacities, lead times, routes) are configured values.
             </p>
           </CardContent>
         </Card>
@@ -281,6 +301,38 @@ export default function SimulationPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Monte Carlo engine extras */}
+                {typeof result.service_level === "number" && (
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border bg-muted/40 px-4 py-2.5 text-sm">
+                    <span>
+                      <span className="text-muted-foreground">Service level </span>
+                      <span className="font-semibold tabular-nums">
+                        {(result.service_level * 100).toFixed(1)}%
+                      </span>
+                      {typeof result.baseline_service_level === "number" && (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          vs {(result.baseline_service_level * 100).toFixed(1)}%
+                          baseline
+                        </span>
+                      )}
+                    </span>
+                    {typeof result.emissions_tons_co2 === "number" && (
+                      <span>
+                        <span className="text-muted-foreground">Emissions </span>
+                        <span className="font-semibold tabular-nums">
+                          {result.emissions_tons_co2.toFixed(1)} t CO₂
+                        </span>
+                      </span>
+                    )}
+                    {typeof result.n_runs === "number" && (
+                      <span className="text-xs text-muted-foreground">
+                        {result.n_runs} Monte Carlo runs
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* Affected nodes & routes */}
                 <div className="grid gap-4 lg:grid-cols-2">

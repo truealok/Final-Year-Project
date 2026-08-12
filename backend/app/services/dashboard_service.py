@@ -1,10 +1,24 @@
-"""Dashboard business logic - aggregates KPIs from real data + mock metrics."""
+"""Dashboard business logic — every KPI is computed, none are random.
 
-import random
-from datetime import date
+Sources per KPI:
+
+- forecast accuracy   → ML registry (100 − mean validation WAPE across
+                        trained models; ``0`` and clearly absent when no
+                        model is trained yet)
+- resilience / cost / stockout / recovery
+                      → recent Monte Carlo simulation runs when available,
+                        else derived from the live network snapshot
+                        (inventory cover vs demand, supplier lead times)
+- inventory snapshot  → inventory table aggregates
+- carbon emissions    → configured per-mode emission factors applied to the
+                        network's current demand flows (30-day estimate);
+                        change % = real sales-volume change month over month
+- alerts / simulations → latest database records
+"""
 
 from app.repositories.alert_repository import AlertRepository
 from app.repositories.inventory_repository import InventoryRepository
+from app.repositories.sales_repository import SalesRepository
 from app.repositories.simulation_repository import SimulationRepository
 from app.schemas.alert import AlertRead
 from app.schemas.dashboard import (
@@ -13,6 +27,9 @@ from app.schemas.dashboard import (
     InventorySnapshot,
 )
 from app.schemas.simulation import SimulationHistoryRead
+from app.services.digital_twin_service import DigitalTwinService
+from app.services.ml import ml_engine
+from app.services.twin_graph import route_emissions_kg_per_day
 
 
 class DashboardService:
@@ -21,25 +38,35 @@ class DashboardService:
         alerts: AlertRepository,
         simulations: SimulationRepository,
         inventory: InventoryRepository,
+        sales: SalesRepository,
+        twin: DigitalTwinService,
     ) -> None:
         self.alerts = alerts
         self.simulations = simulations
         self.inventory = inventory
+        self.sales = sales
+        self.twin = twin
+
+    @staticmethod
+    def _forecast_accuracy() -> float:
+        """100 − mean validation WAPE of trained models (0 when untrained)."""
+        info = ml_engine.models_info()
+        wapes = [
+            m["wape"] for m in info.values() if m.get("wape") is not None
+        ]
+        if not wapes:
+            return 0.0
+        return round(max(0.0, 100.0 - sum(wapes) / len(wapes)), 1)
 
     async def overview(self) -> DashboardResponse:
-        """Build the dashboard snapshot.
-
-        Simulation-derived KPIs come from recent runs when available;
-        forecast accuracy and carbon metrics are deterministic mock values
-        until the ML services are integrated.
-        """
-        # Deterministic per-day mock so the UI is stable within a day.
-        rng = random.Random(date.today().toordinal())
-
+        """Build the dashboard snapshot from live data."""
+        snap = await self.twin.snapshot()
         recent_sims = await self.simulations.recent(5)
+
         if recent_sims:
             resilience = round(
-                sum(s.resilience_score for s in recent_sims) / len(recent_sims), 1
+                sum(s.resilience_score for s in recent_sims) / len(recent_sims),
+                1,
             )
             expected_cost = round(recent_sims[0].expected_cost, 2)
             stockout = round(
@@ -53,16 +80,44 @@ class DashboardService:
                 1,
             )
         else:
-            resilience = round(rng.uniform(72, 84), 1)
-            expected_cost = round(rng.uniform(180_000, 420_000), 2)
-            stockout = round(rng.uniform(0.06, 0.18), 3)
-            recovery = round(rng.uniform(4, 11), 1)
+            # No simulations yet → derive from the network snapshot.
+            resilience = snap.resilience_score
+            expected_cost = 0.0
+            from app.models.enums import NodeType
+
+            warehouses = [
+                n for n in snap.by_type(NodeType.WAREHOUSE)
+                if n.daily_demand > 0
+            ]
+            # share of demand-bearing warehouses with < 7 days of cover
+            thin = [
+                w for w in warehouses
+                if w.cover_days is not None and w.cover_days < 7
+            ]
+            stockout = round(len(thin) / len(warehouses), 3) if warehouses else 0.0
+            supplier_leads = [
+                n.lead_time_days
+                for n in snap.by_type(NodeType.SUPPLIER)
+                if n.lead_time_days
+            ]
+            recovery = round(
+                sum(supplier_leads) / len(supplier_leads), 1
+            ) if supplier_leads else 0.0
+
+        # ---- carbon: configured factors x current demand flows -------- #
+        kg_per_day = route_emissions_kg_per_day(snap)
+        month_tons = round(kg_per_day * 30 / 1000, 1)
+        # real month-over-month sales volume change drives the trend
+        totals = await self.sales.product_window_totals(30)
+        last = sum(t[1] for t in totals)
+        prev = sum(t[2] for t in totals)
+        change_pct = round((last - prev) / prev * 100, 1) if prev else 0.0
 
         inventory_summary = await self.inventory.summary()
         latest_alerts = await self.alerts.latest(5)
 
         return DashboardResponse(
-            forecast_accuracy=round(rng.uniform(85.5, 93.5), 1),
+            forecast_accuracy=self._forecast_accuracy(),
             resilience_score=resilience,
             expected_cost=expected_cost,
             current_inventory=InventorySnapshot(
@@ -74,8 +129,8 @@ class DashboardService:
             stockout_probability=stockout,
             recovery_time_days=recovery,
             carbon_emissions=CarbonEmissions(
-                total_tons_co2=round(rng.uniform(950, 1450), 1),
-                change_pct=round(rng.uniform(-8.0, 4.0), 1),
+                total_tons_co2=month_tons,
+                change_pct=change_pct,
             ),
             latest_alerts=[AlertRead.model_validate(a) for a in latest_alerts],
             recent_simulations=[

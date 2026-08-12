@@ -229,7 +229,22 @@ export default function ForecastPage() {
           title="Forecast"
           description={
             result
-              ? `${titleCase(result.model_used)} · ${formatDate(result.prediction_date)} · ${(result.confidence_level * 100).toFixed(0)}% interval`
+              ? [
+                  `${titleCase(result.model_used)} · ${formatDate(result.prediction_date)} · ${(result.confidence_level * 100).toFixed(0)}% interval`,
+                  result.metrics.engine === "ml"
+                    ? `validation: ${
+                        typeof result.metrics.wape === "number"
+                          ? `WAPE ${result.metrics.wape.toFixed(1)}% · `
+                          : ""
+                      }${
+                        typeof result.metrics.mae === "number"
+                          ? `MAE ${result.metrics.mae.toFixed(1)}`
+                          : ""
+                      }`
+                    : "simulated (no trained model for this product)",
+                ]
+                  .filter(Boolean)
+                  .join(" — ")
               : "Run a forecast to see predictions"
           }
           height={300}

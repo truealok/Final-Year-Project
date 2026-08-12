@@ -1,22 +1,31 @@
-"""Digital twin business logic.
+"""Digital twin business logic — real NetworkX-backed graph analytics.
 
-PLACEHOLDER ENGINE: real graph analytics (NetworkX) is intentionally NOT
-implemented. The network is assembled from real database entities (suppliers,
-factories, warehouses, stores, transport routes) with simulated status and
-risk attributes. A NetworkX-backed engine can replace the risk/resilience
-computations later without changing the API contract.
+The network is assembled from database entities (suppliers, factories,
+warehouses, stores, transport routes, inventory) into a shared
+:class:`~app.services.twin_graph.NetworkSnapshot`. Everything shown is
+**computed, not random**:
+
+- demand per store/warehouse = trailing-window aggregates of the REAL sales
+  history;
+- warehouse risk = inventory cover days vs demand; factory risk = capacity
+  utilization vs downstream demand; supplier risk = configured reliability;
+- resilience = documented composite (redundancy, coverage, reliability,
+  connectivity) computed on the NetworkX graph.
+
+Network entities/parameters themselves are CONFIGURED (see
+``scripts/seed_network.py``) — the dataset provides demand, not the network.
 """
 
-import random
-import uuid
+import datetime
 
-from app.models.enums import NodeType, RiskLevel
+from app.models.enums import NodeType
 from app.repositories.inventory_repository import InventoryRepository
 from app.repositories.network_repository import (
     FactoryRepository,
     RetailStoreRepository,
     TransportRouteRepository,
 )
+from app.repositories.sales_repository import SalesRepository
 from app.repositories.supplier_repository import SupplierRepository
 from app.repositories.warehouse_repository import WarehouseRepository
 from app.schemas.digital_twin import (
@@ -25,13 +34,12 @@ from app.schemas.digital_twin import (
     NetworkResponse,
     NetworkSummary,
 )
-
-_RISK_ORDER = [
-    RiskLevel.LOW,
-    RiskLevel.MEDIUM,
-    RiskLevel.HIGH,
-    RiskLevel.CRITICAL,
-]
+from app.services.twin_graph import (
+    DEMAND_WINDOW_DAYS,
+    NetworkSnapshot,
+    build_snapshot,
+    overall_risk,
+)
 
 
 class DigitalTwinService:
@@ -43,6 +51,7 @@ class DigitalTwinService:
         stores: RetailStoreRepository,
         routes: TransportRouteRepository,
         inventory: InventoryRepository,
+        sales: SalesRepository,
     ) -> None:
         self.suppliers = suppliers
         self.factories = factories
@@ -50,121 +59,75 @@ class DigitalTwinService:
         self.stores = stores
         self.routes = routes
         self.inventory = inventory
+        self.sales = sales
 
-    @staticmethod
-    def _mock_risk(node_id: uuid.UUID) -> RiskLevel:
-        """Deterministic pseudo-risk for nodes without an explicit level."""
-        rng = random.Random(str(node_id))
-        return rng.choices(_RISK_ORDER, weights=[55, 28, 13, 4], k=1)[0]
+    async def snapshot(self) -> NetworkSnapshot:
+        """Build the shared graph snapshot (also used by the simulator)."""
+        rows = await self.sales.store_daily_rows()
+        if rows:
+            last = max(r[1] for r in rows)
+            window_start = last - datetime.timedelta(days=DEMAND_WINDOW_DAYS)
+            rows = [r for r in rows if r[1] > window_start]
 
-    async def network(self) -> NetworkResponse:
-        """Assemble the supply chain network graph."""
-        nodes: list[NetworkNode] = []
-        quantities = await self.inventory.quantity_by_warehouse()
-
-        for supplier in await self.suppliers.list_all():
-            nodes.append(
-                NetworkNode(
-                    id=supplier.id,
-                    name=supplier.name,
-                    type=NodeType.SUPPLIER,
-                    status=supplier.status.value,
-                    country=supplier.country,
-                    city=supplier.city,
-                    risk_level=supplier.risk_level,
-                )
-            )
-        for factory in await self.factories.list_all():
-            nodes.append(
-                NetworkNode(
-                    id=factory.id,
-                    name=factory.name,
-                    type=NodeType.FACTORY,
-                    status=factory.status.value,
-                    country=factory.country,
-                    city=factory.city,
-                    capacity=factory.capacity_per_day,
-                    risk_level=self._mock_risk(factory.id),
-                )
-            )
-        for warehouse in await self.warehouses.list_all():
-            units = quantities.get(warehouse.id, 0)
-            utilization = (
-                round(units / warehouse.capacity * 100, 1)
-                if warehouse.capacity
-                else None
-            )
-            nodes.append(
-                NetworkNode(
-                    id=warehouse.id,
-                    name=warehouse.name,
-                    type=NodeType.WAREHOUSE,
-                    status=warehouse.status.value,
-                    country=warehouse.country,
-                    city=warehouse.city,
-                    capacity=warehouse.capacity,
-                    current_inventory=units,
-                    utilization_pct=utilization,
-                    risk_level=self._mock_risk(warehouse.id),
-                )
-            )
-        for store in await self.stores.list_all():
-            nodes.append(
-                NetworkNode(
-                    id=store.id,
-                    name=store.name,
-                    type=NodeType.RETAIL_STORE,
-                    status=store.status.value,
-                    country=store.country,
-                    city=store.city,
-                    risk_level=self._mock_risk(store.id),
-                )
-            )
-
-        node_ids = {node.id for node in nodes}
-        edges = [
-            NetworkEdge(
-                id=route.id,
-                source=route.origin_id,
-                target=route.destination_id,
-                transport_mode=route.transport_mode.value,
-                distance_km=route.distance_km,
-                transit_time_hours=route.transit_time_hours,
-                status=route.status.value,
-                risk_level=route.risk_level,
-            )
-            for route in await self.routes.list_all()
-            if route.origin_id in node_ids and route.destination_id in node_ids
-        ]
-
-        return NetworkResponse(
-            nodes=nodes, edges=edges, summary=self._summarize(nodes, edges)
+        return build_snapshot(
+            suppliers=await self.suppliers.list_all(),
+            factories=await self.factories.list_all(),
+            warehouses=await self.warehouses.list_all(),
+            stores=await self.stores.list_all(),
+            routes=await self.routes.list_all(),
+            inventory_by_warehouse=await self.inventory.quantity_by_warehouse(),
+            store_daily_rows=rows,
         )
 
-    @staticmethod
-    def _summarize(
-        nodes: list[NetworkNode], edges: list[NetworkEdge]
-    ) -> NetworkSummary:
+    async def network(self) -> NetworkResponse:
+        """Assemble the supply chain network graph for the frontend."""
+        snap = await self.snapshot()
+
+        nodes = [
+            NetworkNode(
+                id=stats.id,
+                name=stats.name,
+                type=stats.type,
+                status=stats.status,
+                country=stats.country,
+                city=stats.city,
+                capacity=int(stats.capacity) if stats.capacity else None,
+                current_inventory=(
+                    int(stats.inventory_units)
+                    if stats.type == NodeType.WAREHOUSE
+                    else None
+                ),
+                utilization_pct=stats.utilization_pct,
+                risk_level=stats.risk_level,
+            )
+            for stats in snap.nodes.values()
+        ]
+        edges = [
+            NetworkEdge(
+                id=edge.id,
+                source=edge.source,
+                target=edge.target,
+                transport_mode=edge.transport_mode,
+                distance_km=edge.distance_km,
+                transit_time_hours=edge.transit_time_hours,
+                status=edge.status,
+                risk_level=edge.risk_level,
+            )
+            for edge in snap.edges
+        ]
+
         node_counts: dict[str, int] = {t.value: 0 for t in NodeType}
-        risk_score_map = {
-            RiskLevel.LOW: 0,
-            RiskLevel.MEDIUM: 1,
-            RiskLevel.HIGH: 2,
-            RiskLevel.CRITICAL: 3,
-        }
-        total_risk = 0
         for node in nodes:
             node_counts[node.type.value] += 1
-            total_risk += risk_score_map[node.risk_level]
 
-        avg_risk = total_risk / len(nodes) if nodes else 0.0
-        overall = _RISK_ORDER[min(3, round(avg_risk))]
-        resilience = round(max(10.0, 95 - avg_risk * 22), 1)
-
-        return NetworkSummary(
-            total_nodes=len(nodes),
-            total_edges=len(edges),
-            node_counts=node_counts,
-            overall_risk=overall,
-            resilience_score=resilience,
+        return NetworkResponse(
+            nodes=nodes,
+            edges=edges,
+            summary=NetworkSummary(
+                total_nodes=len(nodes),
+                total_edges=len(edges),
+                node_counts=node_counts,
+                overall_risk=overall_risk(list(snap.nodes.values())),
+                resilience_score=snap.resilience_score,
+            ),
         )

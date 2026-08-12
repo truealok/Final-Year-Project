@@ -61,6 +61,9 @@ copy .env.example .env
 # Load data (pick ONE):
 python -m scripts.import_sales "data/Online Retail.xlsx" --reset
 #   ^ REAL dataset (UCI Online Retail — 300 products, ~80k daily sales rows)
+python -m scripts.seed_network --reset
+#   ^ then add the configured supply-chain network (suppliers/factories/
+#     warehouses/routes/inventory sized from the real demand)
 # python -m scripts.seed
 #   ^ or synthetic demo data (fake products/suppliers/logins)
 
@@ -103,6 +106,7 @@ these accounts exist instead: `admin@resilichain.ai` / `Admin@123`,
 |---|---|---|
 | Start API (dev, hot-reload) | `backend/` | `uvicorn app.main:app --reload` |
 | Import REAL dataset | `backend/` | `python -m scripts.import_sales "data/Online Retail.xlsx" --reset` |
+| Create configured network | `backend/` | `python -m scripts.seed_network --reset` |
 | Seed synthetic demo data | `backend/` | `python -m scripts.seed --reset` |
 | Train ML models | `backend/` | `python -m ml.train` |
 | Backend tests | `backend/` | `pytest -q` |

@@ -194,7 +194,7 @@ export interface ForecastPredictResponse {
   prediction_date: string;
   confidence_level: number;
   points: ForecastPoint[];
-  metrics: Record<string, number>;
+  metrics: Record<string, number | string | boolean | null>;
 }
 
 export interface ForecastHistoryItem {
@@ -206,7 +206,7 @@ export interface ForecastHistoryItem {
   end_date: string;
   confidence_level: number;
   forecast_data: ForecastPoint[];
-  metrics: Record<string, number>;
+  metrics: Record<string, number | string | boolean | null>;
   created_at: string;
 }
 
@@ -231,6 +231,7 @@ export interface SimulationRunRequest {
   probability: number;
   affected_node_id?: string | null;
   affected_node_type?: NodeType | null;
+  monte_carlo_runs?: number;
   notes?: string | null;
 }
 
@@ -261,6 +262,11 @@ export interface SimulationResult {
   risk_level: RiskLevel;
   affected_nodes: AffectedNode[];
   affected_routes: AffectedRoute[];
+  /** Monte Carlo engine extras (absent on legacy records) */
+  service_level?: number | null;
+  baseline_service_level?: number | null;
+  emissions_tons_co2?: number | null;
+  n_runs?: number | null;
   created_at: string;
 }
 
