@@ -1,5 +1,7 @@
 """User management business logic (admin operations + self-service)."""
 
+from __future__ import annotations
+
 import uuid
 
 from app.core.security import hash_password

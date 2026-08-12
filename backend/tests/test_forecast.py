@@ -19,7 +19,10 @@ async def test_predict_creates_forecast(client, auth_headers, seeded_refs):
     assert len(body["points"]) == 14
     first = body["points"][0]
     assert first["lower_bound"] <= first["predicted_demand"] <= first["upper_bound"]
-    assert set(body["metrics"]) == {"mape", "rmse", "mae"}
+    # Core metrics always present; the engine adds provenance keys
+    # ("engine": "ml"|"mock", "simulated" for mock runs, model metadata).
+    assert {"mape", "rmse", "mae"} <= set(body["metrics"])
+    assert body["metrics"]["engine"] in ("ml", "mock")
 
     # The run is persisted to history.
     history = await client.get("/api/v1/forecast/history", headers=auth_headers)

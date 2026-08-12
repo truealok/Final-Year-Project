@@ -1,5 +1,7 @@
 """Inventory business logic (CRUD, stock-status derivation, summary)."""
 
+from __future__ import annotations
+
 import uuid
 
 from app.models.category import Category

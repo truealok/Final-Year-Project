@@ -1,9 +1,13 @@
 """Forecast business logic.
 
-PLACEHOLDER ENGINE: real Prophet / XGBoost / LSTM models are intentionally
-NOT implemented. ``_generate_points`` produces realistic, deterministic mock
-forecasts. To integrate a real model later, replace ``_generate_points``
-(or inject a model adapter) - the API contract stays identical.
+Prediction routing (API contract identical either way):
+
+1. **Real ML engine** (``app/services/ml/adapter.py`` → the ``ml`` package):
+   used for prophet/xgboost when a trained model exists for the product.
+   Metrics are real held-out validation errors (``metrics.engine == "ml"``).
+2. **Mock fallback** (``_generate_points``): deterministic simulated output
+   for untrained products and for LSTM (intentionally not implemented).
+   Marked with ``metrics.engine == "mock"`` and ``simulated: True``.
 """
 
 import math
@@ -17,6 +21,7 @@ from app.repositories.forecast_repository import (
     FORECAST_LOAD_OPTIONS,
     ForecastRepository,
 )
+from app.services.ml import ml_engine
 from app.repositories.product_repository import ProductRepository
 from app.repositories.warehouse_repository import WarehouseRepository
 from app.schemas.forecast import (
@@ -98,7 +103,13 @@ class ForecastService:
         if await self.warehouses.get(request.warehouse_id) is None:
             raise NotFoundError("Warehouse not found.")
 
-        points, metrics = self._generate_points(request)
+        # Real ML engine first; deterministic mock as the fallback.
+        ml_result = await ml_engine.predict(request)
+        if ml_result is not None:
+            points, metrics = ml_result
+        else:
+            points, metrics = self._generate_points(request)
+            metrics = {**metrics, "engine": "mock", "simulated": True}
         confidence_level = 0.95
 
         record = await self.forecasts.create(
@@ -144,29 +155,62 @@ class ForecastService:
 
     @staticmethod
     def models() -> list[ForecastModelInfo]:
-        """Describe the forecasting models the platform is designed for."""
+        """Describe the forecasting models.
+
+        prophet/xgboost report ``status="available"`` with **real averaged
+        validation metrics** once trained models exist in the ML registry;
+        until then they are ``"planned"`` with placeholder numbers (marked
+        ``simulated``). LSTM is intentionally not implemented.
+        """
+        real = ml_engine.models_info()
+
+        def info(
+            name: str, display: str, description: str, placeholder: dict
+        ) -> ForecastModelInfo:
+            trained = real.get(name)
+            if trained:
+                return ForecastModelInfo(
+                    name=name,
+                    display_name=display,
+                    status="available",
+                    description=(
+                        f"{description} Trained on {trained['n_series']} "
+                        "series; metrics are averaged held-out validation "
+                        "errors."
+                    ),
+                    metrics={
+                        "mape": trained["mape"],
+                        "rmse": trained["rmse"],
+                        "mae": trained["mae"],
+                        "wape": trained.get("wape"),
+                        "smape": trained.get("smape"),
+                        "n_series": trained["n_series"],
+                        "last_trained": trained.get("last_trained"),
+                    },
+                )
+            return ForecastModelInfo(
+                name=name,
+                display_name=display,
+                status="planned",
+                description=(
+                    f"{description} No trained model yet; predictions are "
+                    "currently simulated."
+                ),
+                metrics={**placeholder, "simulated": True, "last_trained": None},
+            )
+
         return [
-            ForecastModelInfo(
-                name="prophet",
-                display_name="Prophet",
-                status="planned",
-                description=(
-                    "Additive time-series model for trend + seasonality. "
-                    "Integration pending; predictions are currently simulated."
-                ),
-                metrics={"mape": 7.8, "rmse": 18.4, "mae": 13.2,
-                         "last_trained": None},
+            info(
+                "prophet",
+                "Prophet",
+                "Additive time-series model for trend + seasonality.",
+                {"mape": 7.8, "rmse": 18.4, "mae": 13.2},
             ),
-            ForecastModelInfo(
-                name="xgboost",
-                display_name="XGBoost",
-                status="planned",
-                description=(
-                    "Gradient-boosted trees over engineered demand features. "
-                    "Integration pending; predictions are currently simulated."
-                ),
-                metrics={"mape": 6.9, "rmse": 16.1, "mae": 11.8,
-                         "last_trained": None},
+            info(
+                "xgboost",
+                "XGBoost",
+                "Gradient-boosted trees over engineered demand features.",
+                {"mape": 6.9, "rmse": 16.1, "mae": 11.8},
             ),
             ForecastModelInfo(
                 name="lstm",
@@ -177,6 +221,6 @@ class ForecastService:
                     "Integration pending; predictions are currently simulated."
                 ),
                 metrics={"mape": 8.4, "rmse": 19.7, "mae": 14.5,
-                         "last_trained": None},
+                         "simulated": True, "last_trained": None},
             ),
         ]

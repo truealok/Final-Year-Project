@@ -4,6 +4,8 @@ The generator is a rules/mock engine today; a real optimization model can
 replace ``generate`` without touching the API contract.
 """
 
+from __future__ import annotations
+
 import random
 import uuid
 

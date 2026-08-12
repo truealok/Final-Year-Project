@@ -13,3 +13,10 @@ htmlcov/
 *.sqlite3
 dist/
 build/
+
+# ML outputs (binary models, generated figures/logs)
+ml/models/
+ml/artifacts/
+
+# Raw dataset downloads (23MB+, re-downloadable from UCI)
+data/

@@ -1,5 +1,7 @@
 """Generic async repository with common CRUD operations."""
 
+from __future__ import annotations
+
 import uuid
 from collections.abc import Sequence
 from typing import Any, Generic, TypeVar

@@ -1,5 +1,7 @@
 """Report generation and export (CSV / PDF) business logic."""
 
+from __future__ import annotations
+
 import csv
 import io
 import uuid

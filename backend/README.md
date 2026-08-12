@@ -13,7 +13,7 @@ frontend is fully functional **before** the ML models are integrated.
 | Language | Python 3.12+ |
 | Framework | FastAPI (async) |
 | Server | Uvicorn |
-| Database | PostgreSQL (SQLite in-memory for tests) |
+| Database | PostgreSQL or SQLite for dev (SQLite in-memory for tests) |
 | ORM | SQLAlchemy 2.0 (async) |
 | Validation | Pydantic v2 |
 | Auth | JWT (access + rotating refresh tokens), bcrypt |
@@ -42,49 +42,97 @@ Database   (app/models)        SQLAlchemy 2.0 models, UUID PKs, timestamps
 - **Middleware**: CORS, auth context, request logging, request timing
   (`X-Process-Time-Ms`), rate limiting (ready — off by default).
 
-### ML placeholders (by design)
+### ML layer (implemented) & remaining placeholders
 
-Prophet, XGBoost, LSTM, SHAP, NetworkX and Monte Carlo are **intentionally
-not implemented**. `ForecastService`, `SimulationService` and
-`DigitalTwinService` produce realistic, deterministic mock output behind the
-final API contracts — swap the private generation methods for real engines
-later **without changing any route or schema**.
+**Prophet, XGBoost and SHAP are implemented** in the [`ml/`](ml/README.md)
+module: per-product training with chronological validation, best-model
+selection, a versioned registry and real metrics. `POST /forecast/predict`
+serves trained models through `app/services/ml/adapter.py` and falls back to
+the deterministic mock for untrained products (`metrics.engine` tells you
+which). Train with `python -m ml.train`; see [ml/README.md](ml/README.md).
+
+LSTM, NetworkX and Monte Carlo remain **intentionally not implemented** —
+`SimulationService` and `DigitalTwinService` still produce deterministic
+mock output behind the final API contracts and can consume ML forecasts
+(`ml.pipeline.prediction.predict_demand`) when they are built.
 
 ## Quick start
 
-```bash
+### 1. Setup (first time only)
+
+```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\activate          # Windows   (source .venv/bin/activate on Unix)
+.\.venv\Scripts\Activate.ps1    # Windows PowerShell  (source .venv/bin/activate on Unix)
 pip install -r requirements.txt
 
 copy .env.example .env          # then edit DATABASE_URL / JWT_SECRET_KEY
 ```
 
-Start PostgreSQL (example with Docker):
+### 2. Choose a database
+
+**Option A — SQLite (zero setup, recommended for dev).** In `.env` set:
+
+```
+DATABASE_URL=sqlite+aiosqlite:///./dev.db
+```
+
+Tables are auto-created on startup (`AUTO_CREATE_TABLES=true`).
+
+**Option B — PostgreSQL.** Keep the default `DATABASE_URL` from
+`.env.example` and start Postgres (example with Docker):
 
 ```bash
 docker run -d --name resilichain-db -p 5432:5432 \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=resilichain postgres:16
 ```
 
-Seed enterprise mock data (50 products, 20 suppliers, 5 factories,
-10 warehouses, 15 retail stores, 365 days of sales, forecasts, simulations,
-alerts, recommendations):
+### 3. Load data
+
+**Option A — REAL dataset (recommended).** UCI Online Retail (CC BY 4.0):
+541k genuine UK e-commerce transactions → 300 products, ~80k daily sales
+rows, stores per country. Dates are re-anchored forward by whole weeks so
+the data ends this week (values/weekday patterns untouched; `--no-shift`
+keeps 2010-11 dates):
+
+```bash
+# one-time download: https://archive.ics.uci.edu/static/public/352/online+retail.zip
+#   → unzip into data/
+python -m scripts.import_sales "data/Online Retail.xlsx" --reset
+```
+
+Works with any CSV that has `date, product/StockCode, quantity, price`
+columns. No seeded logins — **the first signup becomes admin**.
+
+**Option B — synthetic demo data.** 50 fake products, suppliers,
+warehouses, 365 days of generated sales + demo logins:
 
 ```bash
 python -m scripts.seed            # or: python -m scripts.seed --reset
 ```
 
-Run the API:
+### 4. Run the API
 
-```bash
+```powershell
 uvicorn app.main:app --reload
 ```
 
 Open **http://localhost:8000/docs**.
 
-### Seeded logins
+> ⚠️ **The venv must be active** when you run `uvicorn`. If you see
+> `ModuleNotFoundError: No module named 'sqlalchemy'`, you're using a
+> globally-installed uvicorn with the wrong Python. Either activate the venv
+> first (`.\.venv\Scripts\Activate.ps1`) or run it explicitly:
+>
+> ```powershell
+> .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+> ```
+
+### Logins
+
+With the real dataset there are **no pre-made accounts** — sign up and the
+first account becomes admin. Only the synthetic seed (`scripts.seed`)
+creates demo logins:
 
 | Role | Email | Password |
 |---|---|---|

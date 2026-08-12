@@ -1,5 +1,7 @@
 """Warehouse business logic (CRUD + utilization enrichment)."""
 
+from __future__ import annotations
+
 import uuid
 
 from app.models.enums import EntityStatus

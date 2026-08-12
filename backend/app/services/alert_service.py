@@ -1,5 +1,7 @@
 """Alert business logic."""
 
+from __future__ import annotations
+
 import uuid
 
 from app.models.alert import Alert
