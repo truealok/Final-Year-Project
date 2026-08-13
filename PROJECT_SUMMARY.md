@@ -188,33 +188,13 @@ alok/
 
 ---
 
-### Intelligence layer (built after the ML phase) ★
-- ✅ **NetworkX digital twin** — real directed graph from the DB (10
-  suppliers → 5 factories → 10 warehouses → 11 stores, 41 routes);
-  node risk **computed** from data (inventory cover vs real demand,
-  utilization, supplier reliability); composite resilience score
-- ✅ **Configured network seeder** (`scripts/seed_network.py`) — clearly
-  labelled operational parameters; inventory sized from real 90-day demand
-- ✅ **Monte Carlo disruption simulation** — day-by-day inventory/service
-  propagation over the graph, paired baseline runs, resilience = area under
-  disrupted / baseline service curves; 6 scenario types; expected cost from
-  real unit prices; stockout, recovery, service level and CO₂ all emerge
-  from the simulation (100–5000 configurable replications)
-- ✅ **Rule-based recommendation engine** — 6 transparent rules over real
-  signals (sales growth × cover, below-reorder positions, supplier
-  reliability gaps, warehouse imbalance, simulation follow-ups); every
-  number computed and auditable in `context`
-- ✅ **Dashboard KPIs all computed** — forecast accuracy from the ML
-  registry, resilience/cost/stockout/recovery from simulations or the
-  network snapshot, carbon from configured emission factors × real flows;
-  no random values anywhere
-- ✅ **Provenance surfaced in the UI** — real demand vs configured network
-  parameters clearly separated
-
 ## 5. What is PENDING ⏳
 
 | Item | Notes |
 |---|---|
+| ⏳ **NetworkX digital twin** | The network view currently uses deterministic mock data. Plan: build a real graph model that consumes ML forecasts (`predict_demand`) to compute node risk/impact. The interface is already defined. |
+| ⏳ **Monte Carlo simulation** | `POST /simulation/run` is still a mock engine. Plan: real Monte Carlo runs over forecasted demand + inventory + lead times + disruption parameters. |
+| ⏳ **Smarter recommendations** | Currently generated from templates. Plan: rule-based engine combining forecast ↑ + inventory ↓ + supplier risk ↑ → concrete actions. |
 | ⏳ **LSTM model** | Intentionally not implemented (per project decision). The API already reserves the `lstm` option; requests fall back to mock. |
 | ⏳ **Train remaining products** | 10/300 real products have trained models (config cap `batch.max_series`). Run `python -m ml.train --product all --max-series 300` to cover more. |
 | ⏳ **Forecast accuracy on real data** | Real daily single-product e-commerce demand is intermittent — validation WAPE is ~60–110% (honest numbers, typical for this dataset at daily SKU level). Improving it (weekly aggregation, intermittent-demand models like Croston, price/promo features) is a good next research step. |

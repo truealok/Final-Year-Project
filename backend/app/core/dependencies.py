@@ -134,10 +134,8 @@ def get_forecast_service(db: DbSession) -> ForecastService:
 
 
 def get_simulation_service(db: DbSession) -> SimulationService:
-    # The simulator consumes the SAME network snapshot the digital twin
-    # serves, so both features always describe one graph.
     return SimulationService(
-        SimulationRepository(db), get_digital_twin_service(db)
+        SimulationRepository(db), SupplierRepository(db), WarehouseRepository(db)
     )
 
 
@@ -149,17 +147,12 @@ def get_digital_twin_service(db: DbSession) -> DigitalTwinService:
         RetailStoreRepository(db),
         TransportRouteRepository(db),
         InventoryRepository(db),
-        SalesRepository(db),
     )
 
 
 def get_dashboard_service(db: DbSession) -> DashboardService:
     return DashboardService(
-        AlertRepository(db),
-        SimulationRepository(db),
-        InventoryRepository(db),
-        SalesRepository(db),
-        get_digital_twin_service(db),
+        AlertRepository(db), SimulationRepository(db), InventoryRepository(db)
     )
 
 
@@ -174,13 +167,7 @@ def get_analytics_service(db: DbSession) -> AnalyticsService:
 
 
 def get_recommendation_service(db: DbSession) -> RecommendationService:
-    return RecommendationService(
-        RecommendationRepository(db),
-        InventoryRepository(db),
-        SalesRepository(db),
-        SupplierRepository(db),
-        SimulationRepository(db),
-    )
+    return RecommendationService(RecommendationRepository(db))
 
 
 def get_report_service(db: DbSession) -> ReportService:

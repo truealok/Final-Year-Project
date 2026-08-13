@@ -42,55 +42,19 @@ Database   (app/models)        SQLAlchemy 2.0 models, UUID PKs, timestamps
 - **Middleware**: CORS, auth context, request logging, request timing
   (`X-Process-Time-Ms`), rate limiting (ready — off by default).
 
-### Intelligence layer (implemented)
+### ML layer (implemented) & remaining placeholders
 
-**ML — Prophet, XGBoost, SHAP** ([`ml/`](ml/README.md)): per-product
-training with chronological validation, best-model selection, a versioned
-registry and real metrics. `POST /forecast/predict` serves trained models
-through `app/services/ml/adapter.py` and falls back to the deterministic
-mock for untrained products (`metrics.engine` tells you which). Train with
-`python -m ml.train`.
+**Prophet, XGBoost and SHAP are implemented** in the [`ml/`](ml/README.md)
+module: per-product training with chronological validation, best-model
+selection, a versioned registry and real metrics. `POST /forecast/predict`
+serves trained models through `app/services/ml/adapter.py` and falls back to
+the deterministic mock for untrained products (`metrics.engine` tells you
+which). Train with `python -m ml.train`; see [ml/README.md](ml/README.md).
 
-**Digital twin — NetworkX** (`app/services/twin_graph.py`): a real directed
-graph (suppliers → factories → warehouses → stores) built from the database.
-Node risk is **computed**: warehouse risk from inventory cover days vs real
-demand, factory risk from utilization vs downstream demand, supplier risk
-from reliability. Network resilience is a documented composite (30%
-redundancy + 30% inventory coverage + 25% supplier reliability + 15% store
-connectivity).
-
-**Disruption simulation — Monte Carlo** (`app/services/simulation_engine.py`):
-day-by-day inventory/service simulation over the same graph. Per replication
-demand is sampled from real per-store statistics, disruptions propagate
-supplier → factory → warehouse, and
-
-```
-resilience = area under disrupted service curve / area under baseline curve
-```
-
-(paired demand draws, mean over N configurable replications). Expected cost
-uses the real average unit price; stockout probability, recovery time
-(service AND inventory position restored), service level and CO₂ (configured
-per-mode emission factors) all emerge from the simulation. Six scenario
-types: supplier failure, transport delay, flood, demand spike, warehouse
-failure, machine breakdown.
-
-**Recommendations** (`app/services/recommendation_service.py`): transparent
-rule engine over real signals — sales growth × inventory cover, positions
-below reorder point, supplier reliability gaps, warehouse imbalance and
-low-resilience simulation follow-ups. Every number in a recommendation is
-computed and stored in its `context`.
-
-**Dashboard**: every KPI computed — forecast accuracy = 100 − mean
-validation WAPE from the ML registry; resilience/cost/stockout/recovery from
-recent simulations (or derived from the network snapshot); carbon from
-configured emission factors × real demand flows.
-
-**Data provenance:** product demand is the real UCI dataset; network
-entities and parameters (suppliers, factories, warehouses, routes,
-capacities, lead times, emission factors) are **configured** values created
-by `python -m scripts.seed_network` — never presented as observed data.
-LSTM remains intentionally not implemented.
+LSTM, NetworkX and Monte Carlo remain **intentionally not implemented** —
+`SimulationService` and `DigitalTwinService` still produce deterministic
+mock output behind the final API contracts and can consume ML forecasts
+(`ml.pipeline.prediction.predict_demand`) when they are built.
 
 ## Quick start
 

@@ -1,3 +1,2 @@
-"""ResiliChain AI - Intelligent Supply Chain Forecasting & Resilience Simulator."""
-
+"""Service layer - business logic, orchestrating repositories."""
 __version__ = "1.0.0"

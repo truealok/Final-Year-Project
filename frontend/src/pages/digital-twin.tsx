@@ -195,12 +195,6 @@ export default function DigitalTwinPage() {
           critical risk
         </span>
         <span>Animated edges are currently disrupted. Click a node for details.</span>
-        <span className="basis-full text-[11px]">
-          Data provenance: product demand comes from the real UCI Online
-          Retail dataset; network entities and parameters (suppliers,
-          factories, warehouses, routes, capacities, lead times) are
-          configured operational values, not observed data.
-        </span>
       </div>
 
       <NodePanel node={selected} onClose={() => setSelected(null)} />
